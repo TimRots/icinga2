@@ -173,7 +173,7 @@ void GelfWriter::ReconnectInternal()
 			throw;
 		}
 
-		m_Stream.first = std::make_shared<AsioTlsStream>(IoEngine::Get().GetIoService(), *sslContext, GetHost());
+		m_Stream.first = Shared<AsioTlsStream>::Make(IoEngine::Get().GetIoService(), *sslContext, GetHost());
 	} else {
 		m_Stream.second = std::make_shared<AsioTcpStream>(IoEngine::Get().GetIoService());
 	}
