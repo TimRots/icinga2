@@ -600,7 +600,7 @@ lterm: T_LIBRARY rterm
 	}
 	| T_USING rterm
 	{
-		std::shared_ptr<Expression> expr{$2};
+		Expression::Ptr expr{$2};
 		context->AddImport(expr);
 		$$ = MakeLiteralRaw();
 	}
