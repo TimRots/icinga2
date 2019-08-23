@@ -228,6 +228,8 @@ in				return T_IN;
 \|				return T_BINARY_OR;
 \<				return T_LESS_THAN;
 \>				return T_GREATER_THAN;
+\?				return T_QUESTION_MARK;
+:				return T_COLON;
 }
 
 \(				{ yyextra->m_IgnoreNewlines.push(true); return '('; }

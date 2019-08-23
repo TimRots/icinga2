@@ -122,6 +122,8 @@ static void MakeRBinaryOp(Expression** result, Expression *left, Expression *rig
 %token T_BINARY_OR "| (T_BINARY_OR)"
 %token T_LESS_THAN "< (T_LESS_THAN)"
 %token T_GREATER_THAN "> (T_GREATER_THAN)"
+%token T_QUESTION_MARK "? (T_QUESTION_MARK)"
+%token T_COLON ": (T_COLON)"
 
 %token T_VAR "var (T_VAR)"
 %token T_GLOBALS "globals (T_GLOBALS)"
@@ -197,6 +199,7 @@ static void MakeRBinaryOp(Expression** result, Expression *left, Expression *rig
 %right T_INCLUDE T_INCLUDE_RECURSIVE T_INCLUDE_ZONES T_OBJECT T_TEMPLATE T_APPLY T_IMPORT T_ASSIGN T_IGNORE T_WHERE
 %right T_FUNCTION T_FOR
 %left T_SET T_SET_ADD T_SET_SUBTRACT T_SET_MULTIPLY T_SET_DIVIDE T_SET_MODULO T_SET_XOR T_SET_BINARY_AND T_SET_BINARY_OR
+%right T_QUESTION_MARK T_COLON
 %left T_LOGICAL_OR
 %left T_LOGICAL_AND
 %left T_RETURN T_BREAK T_CONTINUE
@@ -846,6 +849,10 @@ rterm_side_effect: rterm '(' rterm_items ')'
 		}
 
 		$$ = new ConditionalExpression(std::unique_ptr<Expression>($3), std::unique_ptr<Expression>($5), std::move(afalse), @$);
+	}
+	| rterm T_QUESTION_MARK rterm T_COLON rterm
+	{
+		$$ = new ConditionalExpression(std::unique_ptr<Expression>($1), std::unique_ptr<Expression>($3), std::unique_ptr<Expression>($5), @$);
 	}
 	;
 
