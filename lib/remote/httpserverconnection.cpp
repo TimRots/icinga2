@@ -39,7 +39,7 @@ HttpServerConnection::HttpServerConnection(const String& identity, bool authenti
 
 HttpServerConnection::HttpServerConnection(const String& identity, bool authenticated, const std::shared_ptr<AsioTlsStream>& stream, boost::asio::io_service& io)
 	: m_Stream(stream), m_Seen(Utility::GetTime()), m_IoStrand(io), m_ShuttingDown(false), m_HasStartedStreaming(false),
-	m_CheckLivenessTimer(io)
+	m_CheckLivenessTimer(io), m_ProcessMessagesDone(io, false)
 {
 	if (authenticated) {
 		m_ApiUser = ApiUser::GetByClientCN(identity);
@@ -84,6 +84,8 @@ void HttpServerConnection::Disconnect()
 				m_Stream->lowest_layer().cancel();
 			} catch (...) {
 			}
+
+			m_ProcessMessagesDone.Wait(yc);
 
 			try {
 				m_Stream->next_layer().async_shutdown(yc);
@@ -484,6 +486,7 @@ void HttpServerConnection::ProcessMessages(boost::asio::yield_context yc)
 	namespace beast = boost::beast;
 	namespace http = beast::http;
 
+	Defer signalDone ([this]() { m_ProcessMessagesDone.Set(); });
 	Defer disconnect ([this]() { Disconnect(); });
 
 	try {
