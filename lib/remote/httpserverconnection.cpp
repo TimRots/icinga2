@@ -155,6 +155,8 @@ bool EnsureValidHeaders(
 		boost::system::error_code ec;
 		http::async_read_header(stream, buf, parser, yc[ec]);
 
+		if (ec == boost::asio::error::fault)
+			throw std::invalid_argument("Fault.");
 		if (ec) {
 			/* This condition may occur when:
 			 * - Remote closed the socket
