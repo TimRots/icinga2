@@ -144,20 +144,45 @@ bool EnsureValidHeaders(
 )
 {
 	namespace http = boost::beast::http;
+	namespace asio = boost::asio;
+	namespace ssl = asio::ssl;
 
 	bool httpError = true;
 
 	try {
-		try {
-			http::async_read_header(stream, buf, parser, yc);
-		} catch (const boost::system::system_error& ex) {
-			/**
-			 * Unfortunately there's no way to tell an HTTP protocol error
-			 * from an error on a lower layer:
-			 *
-			 * <https://github.com/boostorg/beast/issues/643>
+		boost::system::error_code ec;
+		http::async_read_header(stream, buf, parser, yc[ec]);
+
+		if (ec) {
+			/* This condition may occur when:
+			 * - Remote closed the socket
+			 * - The header is read "endlessly" from an attack
+			 *   and our liveness timer cancels socket IO.
 			 */
-			throw std::invalid_argument(ex.what());
+			if (ec == boost::asio::error::operation_aborted)
+				throw std::invalid_argument("Operation aborted.");
+
+#ifdef _WIN32
+			/* Windows may return a NULL'ed ec and we only
+			 * can guess from the integer error code.
+			 * bad_access/permission_denied means that the socket was cancelled already.
+			 */
+			if (ec == boost::system::errc::bad_address)
+				throw std::invalid_argument("Bad address.");
+
+			if (ec == boost::system::errc::permission_denied)
+				throw std::invalid_argument("Permission denied.");
+
+			throw std::invalid_argument("Windows internal error.");
+#else /* _WIN32 */
+			// https://github.com/boostorg/beast/issues/915
+			if (ec == asio::ssl::error::stream_truncated) {
+				throw std::invalid_argument("TLS stream was unexpectedly truncated, terminating request.");
+			} else {
+				throw std::invalid_argument(ec.message());
+			}
+#endif /* _WIN32 */
+
 		}
 
 		httpError = false;
