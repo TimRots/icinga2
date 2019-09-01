@@ -78,24 +78,63 @@ void HttpServerConnection::Disconnect()
 			Log(LogInformation, "HttpServerConnection")
 				<< "HTTP client disconnected (from " << m_PeerAddress << ")";
 
+			boost::asio::deadline_timer dt(IoEngine::Get().GetIoService());
+			boost::system::error_code ec;
+
 			m_CheckLivenessTimer.cancel();
 
 			try {
 				m_Stream->lowest_layer().cancel();
 			} catch (...) {
+				Log(LogCritical, "HttpServerConnection")
+					<< "Exception thrown in m_Stream->lowest_layer().cancel();";
 			}
 
+			Log(LogCritical, "LOLCAT")
+				<< "Before m_ProcessMessagesDone.Wait(yc);";
+
 			m_ProcessMessagesDone.Wait(yc);
+
+			Log(LogCritical, "LOLCAT")
+				<< "After m_ProcessMessagesDone.Wait(yc);";
+
+#ifdef _WIN32
+			Log(LogCritical, "HttpServerConnection")
+				<< "After m_ProcessMessagesDone.Wait(yc); Windows sockets are fucking dumb, let's sleep before destrying everything.";
+
+			dt.expires_from_now(boost::posix_time::seconds(1));
+			dt.async_wait(yc[ec]);
+#endif /* _WIN32 */
 
 			try {
 				m_Stream->next_layer().async_shutdown(yc);
 			} catch (...) {
+				Log(LogCritical, "HttpServerConnection")
+					<< "Exception thrown in m_Stream->next_layer().async_shutdown(yc);";
 			}
+
+#ifdef _WIN32
+			Log(LogCritical, "HttpServerConnection")
+				<< "After: m_Stream->next_layer().async_shutdown(yc); Windows sockets are fucking dumb, let's sleep before destrying everything.";
+
+			dt.expires_from_now(boost::posix_time::seconds(1));
+			dt.async_wait(yc[ec]);
+#endif /* _WIN32 */
 
 			try {
 				m_Stream->lowest_layer().shutdown(m_Stream->lowest_layer().shutdown_both);
 			} catch (...) {
+				Log(LogCritical, "HttpServerConnection")
+					<< "Exception thrown in m_Stream->lowest_layer().shutdown(m_Stream->lowest_layer().shutdown_both);";
 			}
+
+#ifdef _WIN32
+			Log(LogCritical, "HttpServerConnection")
+				<< "After  m_Stream->lowest_layer().shutdown(m_Stream->lowest_layer().shutdown_both); Windows sockets are fucking dumb, let's sleep before destrying everything.";
+
+			dt.expires_from_now(boost::posix_time::seconds(10));
+			dt.async_wait(yc[ec]);
+#endif /* _WIN32 */
 
 			auto listener (ApiListener::GetInstance());
 
@@ -142,18 +181,27 @@ bool EnsureValidHeaders(
 	boost::beast::flat_buffer& buf,
 	boost::beast::http::parser<true, boost::beast::http::string_body>& parser,
 	boost::beast::http::response<boost::beast::http::string_body>& response,
+	bool& shuttingDown,
 	boost::asio::yield_context& yc
 )
 {
 	namespace http = boost::beast::http;
-	namespace asio = boost::asio;
-	namespace ssl = asio::ssl;
+        namespace asio = boost::asio;
+        namespace ssl = asio::ssl;
 
 	bool httpError = true;
 
 	try {
 		boost::system::error_code ec;
 		http::async_read_header(stream, buf, parser, yc[ec]);
+
+		if (ec == boost::asio::error::connection_reset ||
+				ec == boost::asio::error::bad_descriptor ||
+				ec == boost::asio::error::operation_aborted ||
+				ec == ssl::error::stream_truncated ||
+				ec == http::error::end_of_stream) {
+			throw std::invalid_argument("Fuck off.");
+		}
 
 		if (ec == boost::asio::error::fault)
 			throw std::invalid_argument("Fault.");
@@ -407,9 +455,11 @@ bool EnsureValidBody(
 		parser.body_limit(maxSize);
 	}
 
-	try {
-		http::async_read(stream, buf, parser, yc);
-	} catch (const boost::system::system_error& ex) {
+	boost::system::error_code ec;
+
+	http::async_read(stream, buf, parser, yc[ec]);
+
+	if (ec) {
 		/**
 		 * Unfortunately there's no way to tell an HTTP protocol error
 		 * from an error on a lower layer:
@@ -422,11 +472,11 @@ bool EnsureValidBody(
 		if (parser.get()[http::field::accept] == "application/json") {
 			HttpUtility::SendJsonBody(response, nullptr, new Dictionary({
 				{ "error", 400 },
-				{ "status", String("Bad Request: ") + ex.what() }
+				{ "status", String("Bad Request: ") + ec.message() }
 			}));
 		} else {
 			response.set(http::field::content_type, "text/html");
-			response.body() = String("<h1>Bad Request</h1><p><pre>") + ex.what() + "</pre></p>";
+			response.body() = String("<h1>Bad Request</h1><p><pre>") + ec.message() + "</pre></p>";
 			response.set(http::field::content_length, response.body().size());
 		}
 
@@ -505,7 +555,9 @@ void HttpServerConnection::ProcessMessages(boost::asio::yield_context yc)
 
 			response.set(http::field::server, l_ServerHeader);
 
-			if (!EnsureValidHeaders(*m_Stream, buf, parser, response, yc)) {
+			//Reset buffer for each message
+			//buf = {};
+			if (!EnsureValidHeaders(*m_Stream, buf, parser, response, m_ShuttingDown, yc)) {
 				break;
 			}
 

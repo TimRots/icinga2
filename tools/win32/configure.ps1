@@ -55,6 +55,7 @@ if (Test-Path CMakeCache.txt) {
   -DBOOST_LIBRARYDIR="$env:BOOST_LIBRARYDIR" `
   -DBOOST_INCLUDEDIR="$env:BOOST_ROOT" `
   -DFLEX_EXECUTABLE="$env:FLEX_BINARY" `
+  -DCMAKE_INSTALL_PREFIX="C:\Program Files\Icinga2-build" `
   -DBISON_EXECUTABLE="$env:BISON_BINARY"
 
 cd "$sourcePath"
