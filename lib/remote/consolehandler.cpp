@@ -139,6 +139,9 @@ bool ConsoleHandler::ExecuteScriptHelper(boost::beast::http::request<boost::beas
 			{ "result", Serialize(exprResult, 0) }
 		});
 	} catch (const ScriptError& ex) {
+		Log(LogCritical, "LOLCAT")
+			<< "HAHAHAHA your expression is invalid, fucker.";
+
 		DebugInfo di = ex.GetDebugInfo();
 
 		std::ostringstream msgbuf;

@@ -31,6 +31,7 @@
 using namespace icinga;
 
 auto const l_ServerHeader ("Icinga/" + Application::GetAppVersion());
+auto l_CoroutinesStackSize = 64 * 1024 * 1024;
 
 HttpServerConnection::HttpServerConnection(const String& identity, bool authenticated, const std::shared_ptr<AsioTlsStream>& stream)
 	: HttpServerConnection(identity, authenticated, stream, IoEngine::Get().GetIoService())
@@ -61,8 +62,8 @@ void HttpServerConnection::Start()
 
 	HttpServerConnection::Ptr keepAlive (this);
 
-	asio::spawn(m_IoStrand, [this, keepAlive](asio::yield_context yc) { ProcessMessages(yc); });
-	asio::spawn(m_IoStrand, [this, keepAlive](asio::yield_context yc) { CheckLiveness(yc); });
+	spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) { ProcessMessages(keepAlive, yc); });
+	spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) { CheckLiveness(keepAlive, yc); });
 }
 
 void HttpServerConnection::Disconnect()
@@ -71,27 +72,20 @@ void HttpServerConnection::Disconnect()
 
 	HttpServerConnection::Ptr keepAlive (this);
 
-	asio::spawn(m_IoStrand, [this, keepAlive](asio::yield_context yc) {
+	spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) {
 		if (!m_ShuttingDown) {
 			m_ShuttingDown = true;
 
 			Log(LogInformation, "HttpServerConnection")
 				<< "HTTP client disconnected (from " << m_PeerAddress << ")";
 
-			try {
-				m_Stream->next_layer().async_shutdown(yc);
-			} catch (...) {
-			}
+			boost::system::error_code ec;
 
-			try {
-				m_Stream->lowest_layer().shutdown(m_Stream->lowest_layer().shutdown_both);
-			} catch (...) {
-			}
+			m_Stream->next_layer().async_shutdown(yc[ec]);
 
-			try {
-				m_Stream->lowest_layer().cancel();
-			} catch (...) {
-			}
+			m_Stream->lowest_layer().shutdown(m_Stream->lowest_layer().shutdown_both, ec);
+
+			m_Stream->lowest_layer().cancel(ec);
 
 			m_CheckLivenessTimer.cancel();
 
@@ -100,9 +94,15 @@ void HttpServerConnection::Disconnect()
 			if (listener) {
 				CpuBoundWork removeHttpClient (yc);
 
+				Log(LogCritical, "LOLCAT")
+					<< "Removing HTTP Client, fuckers.";
+
 				listener->RemoveHttpClient(this);
 			}
 		}
+
+		Log(LogCritical, "LOLCAT")
+			<< "Disconnect: keepAlive Ptr address: " << keepAlive;
 	});
 }
 
@@ -114,7 +114,7 @@ void HttpServerConnection::StartStreaming()
 
 	HttpServerConnection::Ptr keepAlive (this);
 
-	asio::spawn(m_IoStrand, [this, keepAlive](asio::yield_context yc) {
+	spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) {
 		if (!m_ShuttingDown) {
 			char buf[128];
 			asio::mutable_buffer readBuf (buf, 128);
@@ -145,48 +145,44 @@ bool EnsureValidHeaders(
 {
 	namespace http = boost::beast::http;
 
-	bool httpError = true;
+	bool httpError = false;
+	String errorMsg;
 
-	try {
-		try {
-			http::async_read_header(stream, buf, parser, yc);
-		} catch (const boost::system::system_error& ex) {
-			/**
-			 * Unfortunately there's no way to tell an HTTP protocol error
-			 * from an error on a lower layer:
-			 *
-			 * <https://github.com/boostorg/beast/issues/643>
-			 */
-			throw std::invalid_argument(ex.what());
-		}
+	boost::system::error_code ec;
 
-		httpError = false;
+	http::async_read_header(stream, buf, parser, yc[ec]);
 
-		switch (parser.get().version()) {
+	if (ec) {
+		errorMsg = ec.message();
+		httpError = true;
+	}
+
+	switch (parser.get().version()) {
 		case 10:
 		case 11:
 			break;
 		default:
-			throw std::invalid_argument("Unsupported HTTP version");
-		}
-	} catch (const std::invalid_argument& ex) {
-		response.result(http::status::bad_request);
+			errorMsg = "Unsupported HTTP version";
+	}
 
+
+	if (!errorMsg.IsEmpty() || httpError) {
 		if (!httpError && parser.get()[http::field::accept] == "application/json") {
 			HttpUtility::SendJsonBody(response, nullptr, new Dictionary({
 				{ "error", 400 },
-				{ "status", String("Bad Request: ") + ex.what() }
+				{ "status", String("Bad Request: ") + errorMsg }
 			}));
 		} else {
 			response.set(http::field::content_type, "text/html");
-			response.body() = String("<h1>Bad Request</h1><p><pre>") + ex.what() + "</pre></p>";
+			response.body() = String("<h1>Bad Request</h1><p><pre>") + errorMsg + "</pre></p>";
 			response.set(http::field::content_length, response.body().size());
 		}
 
 		response.set(http::field::connection, "close");
 
-		http::async_write(stream, response, yc);
-		stream.async_flush(yc);
+		boost::system::error_code ec;
+		http::async_write(stream, response, yc[ec]);
+		stream.async_flush(yc[ec]);
 
 		return false;
 	}
@@ -208,8 +204,9 @@ void HandleExpect100(
 
 		response.result(http::status::continue_);
 
-		http::async_write(stream, response, yc);
-		stream.async_flush(yc);
+		boost::system::error_code ec;
+		http::async_write(stream, response, yc[ec]);
+		stream.async_flush(yc[ec]);
 	}
 }
 
@@ -252,8 +249,9 @@ bool HandleAccessControl(
 					response.set(http::field::content_length, response.body().size());
 					response.set(http::field::connection, "close");
 
-					http::async_write(stream, response, yc);
-					stream.async_flush(yc);
+					boost::system::error_code ec;
+					http::async_write(stream, response, yc[ec]);
+					stream.async_flush(yc[ec]);
 
 					return false;
 				}
@@ -281,8 +279,9 @@ bool EnsureAcceptHeader(
 		response.set(http::field::content_length, response.body().size());
 		response.set(http::field::connection, "close");
 
-		http::async_write(stream, response, yc);
-		stream.async_flush(yc);
+		boost::system::error_code ec;
+		http::async_write(stream, response, yc[ec]);
+		stream.async_flush(yc[ec]);
 
 		return false;
 	}
@@ -320,8 +319,9 @@ bool EnsureAuthenticatedUser(
 			response.set(http::field::content_length, response.body().size());
 		}
 
-		http::async_write(stream, response, yc);
-		stream.async_flush(yc);
+		boost::system::error_code ec;
+		http::async_write(stream, response, yc[ec]);
+		stream.async_flush(yc[ec]);
 
 		return false;
 	}
@@ -378,9 +378,10 @@ bool EnsureValidBody(
 		parser.body_limit(maxSize);
 	}
 
-	try {
-		http::async_read(stream, buf, parser, yc);
-	} catch (const boost::system::system_error& ex) {
+	boost::system::error_code ec;
+	http::async_read(stream, buf, parser, yc[ec]);
+
+	if (ec) {
 		/**
 		 * Unfortunately there's no way to tell an HTTP protocol error
 		 * from an error on a lower layer:
@@ -393,18 +394,18 @@ bool EnsureValidBody(
 		if (parser.get()[http::field::accept] == "application/json") {
 			HttpUtility::SendJsonBody(response, nullptr, new Dictionary({
 				{ "error", 400 },
-				{ "status", String("Bad Request: ") + ex.what() }
+				{ "status", String("Bad Request: ") + ec.message() }
 			}));
 		} else {
 			response.set(http::field::content_type, "text/html");
-			response.body() = String("<h1>Bad Request</h1><p><pre>") + ex.what() + "</pre></p>";
+			response.body() = String("<h1>Bad Request</h1><p><pre>") + ec.message() + "</pre></p>";
 			response.set(http::field::content_length, response.body().size());
 		}
 
 		response.set(http::field::connection, "close");
 
-		http::async_write(stream, response, yc);
-		stream.async_flush(yc);
+		http::async_write(stream, response, yc[ec]);
+		stream.async_flush(yc[ec]);
 
 		return false;
 	}
@@ -429,6 +430,10 @@ bool ProcessRequest(
 		CpuBoundWork handlingRequest (yc);
 
 		HttpHandler::ProcessRequest(stream, authenticatedUser, request, response, yc, server);
+
+		Log(LogCritical, "LOLCAT")
+			<< "Successfully processed request.";
+
 	} catch (const std::exception& ex) {
 		if (hasStartedStreaming) {
 			return false;
@@ -438,8 +443,9 @@ bool ProcessRequest(
 
 		HttpUtility::SendJsonError(response, nullptr, 500, "Unhandled exception" , DiagnosticInformation(ex));
 
-		http::async_write(stream, response, yc);
-		stream.async_flush(yc);
+		boost::system::error_code ec;
+		http::async_write(stream, response, yc[ec]);
+		stream.async_flush(yc[ec]);
 
 		return true;
 	}
@@ -448,18 +454,22 @@ bool ProcessRequest(
 		return false;
 	}
 
-	http::async_write(stream, response, yc);
-	stream.async_flush(yc);
+	boost::system::error_code ec;
+	http::async_write(stream, response, yc[ec]);
+	stream.async_flush(yc[ec]);
 
 	return true;
 }
 
-void HttpServerConnection::ProcessMessages(boost::asio::yield_context yc)
+void HttpServerConnection::ProcessMessages(const HttpServerConnection::Ptr& keepAlive, boost::asio::yield_context yc)
 {
 	namespace beast = boost::beast;
 	namespace http = beast::http;
 
-	Defer disconnect ([this]() { Disconnect(); });
+		Log(LogCritical, "LOLCAT")
+			<< "ProcessMessages: keepAlive Ptr address: " << keepAlive;
+
+	Defer disconnect ([this, keepAlive]() { Disconnect(); });
 
 	try {
 		beast::flat_buffer buf;
@@ -475,6 +485,7 @@ void HttpServerConnection::ProcessMessages(boost::asio::yield_context yc)
 
 			response.set(http::field::server, l_ServerHeader);
 
+			buf = {};
 			if (!EnsureValidHeaders(*m_Stream, buf, parser, response, yc)) {
 				break;
 			}
@@ -520,6 +531,7 @@ void HttpServerConnection::ProcessMessages(boost::asio::yield_context yc)
 				break;
 			}
 
+			buf = {};
 			if (!EnsureValidBody(*m_Stream, buf, parser, authenticatedUser, response, yc)) {
 				break;
 			}
@@ -540,9 +552,11 @@ void HttpServerConnection::ProcessMessages(boost::asio::yield_context yc)
 				<< "Unhandled exception while processing HTTP request: " << ex.what();
 		}
 	}
+		Log(LogCritical, "LOLCAT")
+			<< "ProcessMessages END: keepAlive Ptr address: " << keepAlive;
 }
 
-void HttpServerConnection::CheckLiveness(boost::asio::yield_context yc)
+void HttpServerConnection::CheckLiveness(const HttpServerConnection::Ptr& keepAlive, boost::asio::yield_context yc)
 {
 	boost::system::error_code ec;
 

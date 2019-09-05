@@ -145,8 +145,10 @@ if(MSVC)
   # /GL- - https://docs.microsoft.com/en-us/cpp/build/reference/gl-whole-program-optimization?view=vs-2019
   # /GS- - https://docs.microsoft.com/en-us/cpp/build/reference/gs-buffer-security-check?view=vs-2019
   # /RTCu - https://docs.microsoft.com/en-us/cpp/build/reference/rtc-run-time-error-checks?view=vs-2019
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj /GT /Od /RTCu /GL- /GS- /EHs" CACHE STRING "Flags used by the CXX compiler during all build types." FORCE)
+  # /Gs99999999 - https://geidav.wordpress.com/2013/03/21/anatomy-of-dynamic-stack-allocations/
+  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Gs99999999 /bigobj /GT /Od /RTCu /GL- /GS- /EHs" CACHE STRING "Flags used by the CXX compiler during all build types." FORCE)
   #add_compile_options("/bigobj" "/Od" "/GL-" "/EHs")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj /GL- /EHs" CACHE STRING "Flags used by the CXX compiler during all build types." FORCE)
 
   #string(REPLACE "/EHsc" " /bigobj /GL- /EHs" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 

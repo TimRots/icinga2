@@ -45,8 +45,8 @@ private:
 
 	HttpServerConnection(const String& identity, bool authenticated, const std::shared_ptr<AsioTlsStream>& stream, boost::asio::io_service& io);
 
-	void ProcessMessages(boost::asio::yield_context yc);
-	void CheckLiveness(boost::asio::yield_context yc);
+	void ProcessMessages(const HttpServerConnection::Ptr& keepAlive, boost::asio::yield_context yc);
+	void CheckLiveness(const HttpServerConnection::Ptr& keepAlive, boost::asio::yield_context yc);
 };
 
 }
