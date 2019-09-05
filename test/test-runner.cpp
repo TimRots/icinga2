@@ -16,6 +16,6 @@ main(int argc, char **argv)
 }
 
 #ifdef _WIN32
-#include <boost/test/impl/unit_test_main.ipp>
-#include <boost/test/impl/framework.ipp>
+//#include <boost/test/impl/unit_test_main.ipp>
+//#include <boost/test/impl/framework.ipp>
 #endif /* _WIN32 */
