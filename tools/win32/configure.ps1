@@ -10,6 +10,9 @@ if (-not (Test-Path env:CMAKE_BUILD_TYPE)) {
 if (-not (Test-Path "$env:ICINGA2_BUILDPATH")) {
   mkdir "$env:ICINGA2_BUILDPATH" | out-null
 }
+if (-not (Test-Path env:ICINGA2_INSTALLPATH)) {
+  $env:ICINGA2_INSTALLPATH = 'C:\Program Files\Icinga2'
+}
 if (-not (Test-Path env:CMAKE_PATH)) {
   $env:CMAKE_PATH = 'C:\Program Files\CMake\bin'
 }
@@ -39,8 +42,6 @@ $sourcePath = Get-Location
 
 cd "$env:ICINGA2_BUILDPATH"
 
-#-DCMAKE_INSTALL_PREFIX="C:\Program Files\Icinga2" `
-
 # Invalidate cache in case something in the build environment changed
 if (Test-Path CMakeCache.txt) {
   Remove-Item -Force CMakeCache.txt | Out-Null
@@ -48,7 +49,8 @@ if (Test-Path CMakeCache.txt) {
 
 & cmake.exe "$sourcePath" `
   -DCMAKE_BUILD_TYPE="$env:CMAKE_BUILD_TYPE" `
-  -G "$env:CMAKE_GENERATOR" -DCPACK_GENERATOR=WIX `
+  -G "$env:CMAKE_GENERATOR" -A "$env:CMAKE_GENERATOR_PLATFORM" -DCPACK_GENERATOR=WIX `
+  -DCMAKE_INSTALL_PREFIX="$env:ICINGA2_INSTALLPATH" `
   -DICINGA2_WITH_MYSQL=OFF -DICINGA2_WITH_PGSQL=OFF `
   -DICINGA2_WITH_LIVESTATUS=OFF -DICINGA2_WITH_COMPAT=OFF `
   -DOPENSSL_ROOT_DIR="$env:OPENSSL_ROOT_DIR" `
