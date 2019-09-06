@@ -9,6 +9,8 @@
 #include <memory>
 #include <thread>
 #include <vector>
+#include <stdexcept>
+#include <boost/exception/all.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/spawn.hpp>
@@ -76,6 +78,50 @@ public:
 	static IoEngine& Get();
 
 	boost::asio::io_service& GetIoService();
+
+	/*
+	 * Custom exceptions thrown in a Boost.Coroutine may cause stack corruption.
+	 * Ensure that these are wrapped correctly.
+	 *
+	 * Inspired by https://github.com/niekbouman/commelec-api/blob/master/commelec-api/coroutine-exception.hpp
+	 * Source: http://boost.2283326.n4.nabble.com/coroutine-only-std-exceptions-are-caught-from-coroutines-td4683671.html
+	 */
+	static inline boost::exception_ptr convertExceptionPtr(std::exception_ptr ex) {
+		try {
+			throw boost::enable_current_exception(ex);
+		} catch (...) {
+			return boost::current_exception();
+		}
+	}
+
+	static inline void rethrow_boost_compatible_exception_pointer() {
+		std::exception_ptr sep;
+		sep = std::current_exception();
+		boost::exception_ptr bep = convertExceptionPtr(sep);
+		boost::rethrow_exception(bep);
+	}
+
+	template <typename Handler, typename Function>
+	static void spawn_coroutine(Handler h, Function f) {
+		//auto l_CoroutinesStackSize = 8 * 1024 * 1024;
+		auto l_CoroutinesStackSize = 64 * 1024; // Default
+
+		boost::asio::spawn(std::forward<Handler>(h),
+			[f](boost::asio::yield_context yc) {
+
+				try {
+					f(yc);
+				} catch (const boost::coroutines::detail::forced_unwind &) {
+					// Required for proper stack unwinding when coroutines are destroyed.
+					throw;
+				} catch (...) {
+					// Handle uncaught exceptions outside of the coroutine where IoEngine.Run() is calld.
+					rethrow_boost_compatible_exception_pointer();
+				}
+			},
+			boost::coroutines::attributes(l_CoroutinesStackSize) // Set a pre-defined stack size.
+		);
+}
 
 private:
 	IoEngine();
