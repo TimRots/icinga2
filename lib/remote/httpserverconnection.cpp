@@ -61,15 +61,13 @@ void HttpServerConnection::Start()
 
 	HttpServerConnection::Ptr keepAlive (this);
 
-	IoEngine::spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) { ProcessMessages(yc); });
-	IoEngine::spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) { CheckLiveness(yc); });
+	IoEngine::spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) { ProcessMessages(keepAlive, yc); });
+	IoEngine::spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) { CheckLiveness(keepAlive, yc); });
 }
 
-void HttpServerConnection::Disconnect()
+void HttpServerConnection::Disconnect(const HttpServerConnection::Ptr& keepAlive)
 {
 	namespace asio = boost::asio;
-
-	HttpServerConnection::Ptr keepAlive (this);
 
 	IoEngine::spawn_coroutine(m_IoStrand, [this, keepAlive](asio::yield_context yc) {
 		if (!m_ShuttingDown) {
@@ -117,7 +115,7 @@ void HttpServerConnection::StartStreaming()
 				m_Stream->async_read_some(readBuf, yc[ec]);
 			} while (!ec);
 
-			Disconnect();
+			Disconnect(keepAlive);
 		}
 	});
 }
@@ -459,12 +457,12 @@ bool ProcessRequest(
 	return true;
 }
 
-void HttpServerConnection::ProcessMessages(boost::asio::yield_context yc)
+void HttpServerConnection::ProcessMessages(const HttpServerConnection::Ptr& keepAlive, boost::asio::yield_context yc)
 {
 	namespace beast = boost::beast;
 	namespace http = beast::http;
 
-	Defer disconnect ([this]() { Disconnect(); });
+	Defer disconnect ([this, keepAlive]() { Disconnect(keepAlive); });
 
 	try {
 		beast::flat_buffer buf;
@@ -551,7 +549,7 @@ void HttpServerConnection::ProcessMessages(boost::asio::yield_context yc)
 	}
 }
 
-void HttpServerConnection::CheckLiveness(boost::asio::yield_context yc)
+void HttpServerConnection::CheckLiveness(const HttpServerConnection::Ptr& keepAlive, boost::asio::yield_context yc)
 {
 	boost::system::error_code ec;
 
@@ -567,7 +565,7 @@ void HttpServerConnection::CheckLiveness(boost::asio::yield_context yc)
 			Log(LogInformation, "HttpServerConnection")
 				<<  "No messages for HTTP connection have been received in the last 10 seconds.";
 
-			Disconnect();
+			Disconnect(keepAlive);
 			break;
 		}
 	}
