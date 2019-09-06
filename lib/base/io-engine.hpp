@@ -103,8 +103,13 @@ public:
 
 	template <typename Handler, typename Function>
 	static void spawn_coroutine(Handler h, Function f) {
-		//auto l_CoroutinesStackSize = 8 * 1024 * 1024;
-		auto l_CoroutinesStackSize = 64 * 1024; // Default
+#ifdef _WIN32
+		// Increase the stack size for Windows coroutines to prevent exception corruption.
+		// Rationale: Low cost Windows agent only & https://github.com/Icinga/icinga2/issues/7431
+		auto l_CoroutinesStackSize = 8 * 1024 * 1024;
+#else /* _WIN32 */
+		auto l_CoroutinesStackSize = boost::coroutines::stack_allocator::traits_type::default_size(); // Default 64 KB
+#endif /* _WIN32 */
 
 		boost::asio::spawn(std::forward<Handler>(h),
 			[f](boost::asio::yield_context yc) {
