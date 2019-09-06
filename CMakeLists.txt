@@ -122,8 +122,18 @@ if(WIN32)
   # Disable optimization for Boost::context
   # https://www.boost.org/doc/libs/1_69_0/libs/context/doc/html/context/overview.html
   # https://docs.microsoft.com/en-us/cpp/build/reference/gl-whole-program-optimization?view=vs-2017
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /bigobj /GL- /EHs")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj /GL- /EHs")
+  #
+  # Disabble Visual Studio Compiler optimizations
+  # /GT - https://docs.microsoft.com/en-us/cpp/build/reference/gt-support-fiber-safe-thread-local-storage?view=vs-2019
+  # /Od - https://docs.microsoft.com/en-us/cpp/build/reference/od-disable-debug?view=vs-2019
+  # /GL- - https://docs.microsoft.com/en-us/cpp/build/reference/gl-whole-program-optimization?view=vs-2019
+  # /GS- - https://docs.microsoft.com/en-us/cpp/build/reference/gs-buffer-security-check?view=vs-2019
+  # /RTCu - https://docs.microsoft.com/en-us/cpp/build/reference/rtc-run-time-error-checks?view=vs-2019
+  # /Gs99999999 - https://geidav.wordpress.com/2013/03/21/anatomy-of-dynamic-stack-allocations/
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj /GT /Od /RTCu /GL- /GS- /EHs" CACHE STRING "Flags used by the CXX compiler during all build types." FORCE)
+  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj /GL- /EHs" CACHE STRING "Flags used by the CXX compiler during all build types." FORCE)
+
+  message(STATUS "Configuring compiler flags for Boost on Windows: ${CMAKE_CXX_FLAGS}")
 
   # detect if 32-bit target
   if(CMAKE_VS_PLATFORM_NAME STREQUAL "Win32")
